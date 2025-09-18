@@ -119,53 +119,70 @@ def draw_scan_band(panel: pygame.Surface, t: float):
 
 def draw_label_vertical(panel: pygame.Surface, t: float, text: str = LABEL_TEXT):
     w, h = panel.get_width(), panel.get_height()
-    if w <= 6 or h <= 6: return
+    if w <= 6 or h <= 6:
+        return
+
     breath = 1.0 + LABEL_BREATH_AMT * math.sin(t * 2.0 * math.pi * 0.25)
     target_w = max(4, int((w - LABEL_MARGIN_PX * 2) * LABEL_EXTRA_W_STRETCH * breath))
+
     base_size = max(14, int(h * 0.24))
     font = pygame.font.SysFont(None, base_size, bold=True)
-    core = font.render(text, True, LABEL_CORE_COLOR)
+
+    core = font.render(text, True, LABEL_CORE_COLOR).convert_alpha()
     ratio = target_w / max(1, core.get_width())
     new_w = max(1, int(core.get_width() * ratio))
     new_h = max(1, int(core.get_height() * ratio * 0.95))
-    core = pygame.transform.smoothscale(core, (new_w, new_h))
-    glow = pygame.Surface((core.get_width()+12, core.get_height()+12), pygame.SRCALPHA)
+    core = pygame.transform.smoothscale(core, (new_w, new_h)).convert_alpha()
+
+    glow = pygame.Surface((core.get_width()+12, core.get_height()+12), pygame.SRCALPHA).convert_alpha()
     for dx, dy in [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]:
-        tmp = font.render(text, True, LABEL_GLOW_COLOR)
-        tmp = pygame.transform.smoothscale(tmp, (new_w, new_h))
+        tmp = font.render(text, True, LABEL_GLOW_COLOR).convert_alpha()
+        tmp = pygame.transform.smoothscale(tmp, (new_w, new_h)).convert_alpha()
         glow.blit(tmp, (dx+6, dy+6))
     glow.set_alpha(LABEL_GLOW_ALPHA)
+
     combo = pygame.Surface((max(glow.get_width(), core.get_width()),
-                            max(glow.get_height(), core.get_height())), pygame.SRCALPHA)
+                            max(glow.get_height(), core.get_height())), pygame.SRCALPHA).convert_alpha()
     combo.blit(glow, ((combo.get_width()-glow.get_width())//2, (combo.get_height()-glow.get_height())//2))
     combo.blit(core, ((combo.get_width()-core.get_width())//2, (combo.get_height()-core.get_height())//2))
     combo = pygame.transform.rotozoom(combo, -90, 1.0)
+
     px = (w - combo.get_width()) // 2
     py = (h - combo.get_height()) // 2
-    panel.blit(combo, (px, py), special_flags=pygame.BLEND_PREMULTIPLIED)
+    panel.blit(combo, (px, py))   
 
 def draw_panel(surf: pygame.Surface, rect: pygame.Rect, t: float, radius: int = 16):
-    if rect.width <= 0 or rect.height <= 0: return
+    if rect.width <= 0 or rect.height <= 0:
+        return
+
+  
     pad = 14
-    glow = pygame.Surface((rect.width + pad*2, rect.height + pad*2), pygame.SRCALPHA)
-    pygame.draw.rect(glow, (*COL_GLOW, GLOW_ALPHA),
-                     (0, 0, glow.get_width(), glow.get_height()),
+    glow = pygame.Surface((rect.width + pad*2, rect.height + pad*2), pygame.SRCALPHA).convert_alpha()
+    pygame.draw.rect(glow, COL_GLOW, (0, 0, glow.get_width(), glow.get_height()),
                      border_radius=radius + pad//2)
-    surf.blit(glow, (rect.x - pad, rect.y - pad), special_flags=pygame.BLEND_PREMULTIPLIED)
-    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    glow.set_alpha(GLOW_ALPHA)
+    surf.blit(glow, (rect.x - pad, rect.y - pad))
+
+   
+    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA).convert_alpha()
+
     pulse = 1.0 + PULSE_AMT * (1 - math.cos(t * PULSE_SPEED * 2.0 * math.pi)) * 0.5
     draw_soft_fill(panel, radius)
+
     if pulse != 1.0:
-        tint = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        tint = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA).convert_alpha()
         mul = max(0, min(70, int(255 * (pulse - 1.0))))
         if mul > 0:
             tint.fill((COL_GLOW[0], COL_GLOW[1], COL_GLOW[2], mul))
-            panel.blit(tint, (0, 0), special_flags=pygame.BLEND_ADD)
+            panel.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
     draw_label_vertical(panel, t, LABEL_TEXT)
     draw_scan_band(panel, t)
+
     pygame.draw.rect(panel, (*COL_EDGE, EDGE_ALPHA),
                      (0, 0, rect.width, rect.height), width=3, border_radius=radius)
-    surf.blit(panel, rect.topleft)
+
+    surf.blit(panel, rect.topleft)  #
 
 # ---------------- ENTITIES ----------------
 class Ship:
