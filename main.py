@@ -1,17 +1,20 @@
+# RIALO Space — Flappy-like game (PC + Web/pygbag)
+# Controls: SPACE / Mouse = flap, R = restart, ESC = quit
 
-import asyncio, sys
-import sys, random, math
+import math, random, asyncio, sys
 from pathlib import Path
 import pygame
 
-# ---------------- Config ----------------
+# -------------------- CONFIG --------------------
 W, H = 480, 720
 FPS = 60
 
+# physics
 GRAVITY = 1400.0
 FLAP_VY  = -460.0
 MAX_VY   = 900.0
 
+# gates
 GATE_W = 92
 GATE_GAP = 200
 GATE_MIN = 70
@@ -21,14 +24,13 @@ SCROLL_SPEED = 260.0
 
 HUD = (230, 250, 255)
 
-# --- Soft Space Blue theme (columns) ---
-COL_CORE    = (120, 205, 255)   #
-COL_EDGE    = ( 80, 170, 255)   
-COL_GLOW    = (160, 220, 255)   
-COL_STRIPE  = (140, 210, 255)   
-COL_SCAN    = (220, 245, 255)   
+# column style (spacey soft blue)
+COL_CORE    = (120, 205, 255)
+COL_EDGE    = ( 80, 170, 255)
+COL_GLOW    = (160, 220, 255)
+COL_STRIPE  = (140, 210, 255)
+COL_SCAN    = (220, 245, 255)
 
-#анимация
 SCAN_SPEED   = 0.28
 PULSE_SPEED  = 0.35
 PULSE_AMT    = 0.035
@@ -37,31 +39,16 @@ EDGE_ALPHA   = 140
 SCAN_ALPHA   = 42
 SCAN_WIDTH_F = 0.16
 
-# --- Вертикальная широкая надпись внутри колоны ---
-LABEL_TEXT          = "RIALO"
-LABEL_CORE_COLOR    = (240, 250, 255)   
-LABEL_GLOW_COLOR    = (170, 230, 255)   
-LABEL_GLOW_ALPHA    = 90
-LABEL_BREATH_AMT    = 0.04             
-LABEL_MARGIN_PX     = 8              
-LABEL_EXTRA_W_STRETCH= 4             
+# vertical RIALO label inside columns
+LABEL_TEXT           = "RIALO"
+LABEL_CORE_COLOR     = (240, 250, 255)
+LABEL_GLOW_COLOR     = (170, 230, 255)
+LABEL_GLOW_ALPHA     = 1800
+LABEL_BREATH_AMT     = 0.4
+LABEL_MARGIN_PX      = 6
+LABEL_EXTRA_W_STRETCH= 1.6
 
-# --- Разряды (не используем тут, можно включить позже) ---
-ENABLE_ARCS     = False
-ARC_COLOR_CORE  = (230, 255, 255)
-ARC_COLOR_GLOW  = (120, 220, 255)
-ARC_WIDTH       = 2
-ARC_GLOW_ALPHA  = 90
-ARC_MIN_GAP_S   = 2.5
-ARC_MAX_GAP_S   = 6.0
-ARC_DURATION_S  = 0.25
-ARC_SEGMENTS    = 7
-
-ASSETS = [Path("."), Path("./assets")]
-BG_NAME   = "space_bg.png"
-SHIP_NAME = "ship.png"
-
-# --- Ship / flame ---
+# ship + flame
 SHIP_SIZE    = (72, 72)
 THRUST_TIME  = 0.18
 FLAME_COLOR_OUTER = (70, 180, 255)
@@ -71,9 +58,14 @@ FLAME_WIDTH    = 10
 FLAME_Y_OFFSET = 5
 NOZZLE_INSET   = 2
 
-# ---------- Utils ----------
+# assets
+ASSET_DIRS = [Path("."), Path("./assets")]
+BG_NAME    = "space_bg.png"
+SHIP_NAME  = "ship.png"
+
+# -------------------- UTILS --------------------
 def load_image(name: str):
-    for d in ASSETS:
+    for d in ASSET_DIRS:
         p = d / name
         if p.exists():
             return pygame.image.load(str(p)).convert_alpha()
@@ -90,12 +82,11 @@ def mask_rect_overlap(mask: pygame.mask.Mask, rect: pygame.Rect, offset):
 def lerp(a, b, t): return a + (b - a) * t
 def clamp8(x): return max(0, min(255, int(x)))
 
-# ---------- Panels (columns) ----------
+# -------------------- COLUMNS DRAW --------------------
 def draw_soft_fill(panel: pygame.Surface, radius: int):
-    """Нежный вертикальный градиент + тонкие диагональные дорожки."""
     w, h = panel.get_width(), panel.get_height()
 
-    # вертикальный градиент
+    # vertical gradient
     for y in range(h):
         ky = y / max(1, h - 1)
         mul = (0.86 + 0.14 * (1 - ky))
@@ -104,20 +95,19 @@ def draw_soft_fill(panel: pygame.Surface, radius: int):
         b = clamp8(COL_CORE[2] * mul)
         pygame.draw.line(panel, (r, g, b), (0, y), (w - 1, y))
 
-    # диагональные дорожки (очень мягкие)
+    # soft diagonal circuits
     stripes = pygame.Surface((w, h), pygame.SRCALPHA)
     step = 14
     for x in range(-h, w, step):
         pygame.draw.line(stripes, (*COL_STRIPE, 24), (x, 0), (x + h, h), width=2)
     panel.blit(stripes, (0, 0), special_flags=pygame.BLEND_ADD)
 
-    # маска скругления
+    # rounded mask
     mask = pygame.Surface((w, h), pygame.SRCALPHA)
     pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, w, h), border_radius=radius)
     panel.blit(mask, (0, 0), special_flags=pygame.BLEND_MULT)
 
 def draw_scan_band(panel: pygame.Surface, t: float):
-    """Тихая скан-лента."""
     w, h = panel.get_width(), panel.get_height()
     phase = (math.sin(t * SCAN_SPEED * 2.0 * math.pi) * 0.5 + 0.5)
     band_h = max(8, int(h * SCAN_WIDTH_F))
@@ -130,57 +120,43 @@ def draw_scan_band(panel: pygame.Surface, t: float):
     panel.blit(band, (0, band_y - band_h // 2), special_flags=pygame.BLEND_ADD)
 
 def draw_label_vertical(panel: pygame.Surface, t: float, text: str = LABEL_TEXT):
-  
+    # wide vertical glowing label "RIALO"
     w, h = panel.get_width(), panel.get_height()
     if w <= 6 or h <= 6: return
 
-    
     breath = 1.0 + LABEL_BREATH_AMT * math.sin(t * 2.0 * math.pi * 0.25)
-
-
     target_w = max(4, int((w - LABEL_MARGIN_PX * 2) * LABEL_EXTRA_W_STRETCH * breath))
 
-    
     base_size = max(14, int(h * 0.24))
     font = pygame.font.SysFont(None, base_size, bold=True)
 
-   
-    text_core = font.render(text, True, LABEL_CORE_COLOR)
+    core = font.render(text, True, LABEL_CORE_COLOR)
+    ratio = target_w / max(1, core.get_width())
+    new_w = max(1, int(core.get_width() * ratio))
+    new_h = max(1, int(core.get_height() * ratio * 0.95))
+    core = pygame.transform.smoothscale(core, (new_w, new_h))
 
-    
-    ratio = target_w / max(1, text_core.get_width())
-    new_w = max(1, int(text_core.get_width() * ratio))
-    new_h = max(1, int(text_core.get_height() * ratio * 0.95))  
-    text_core = pygame.transform.smoothscale(text_core, (new_w, new_h))
-
-   
-    glow = pygame.Surface((text_core.get_width()+12, text_core.get_height()+12), pygame.SRCALPHA)
-    offsets = [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]
-    for dx, dy in offsets:
+    glow = pygame.Surface((core.get_width()+12, core.get_height()+12), pygame.SRCALPHA)
+    for dx, dy in [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]:
         tmp = font.render(text, True, LABEL_GLOW_COLOR)
         tmp = pygame.transform.smoothscale(tmp, (new_w, new_h))
         glow.blit(tmp, (dx+6, dy+6))
     glow.set_alpha(LABEL_GLOW_ALPHA)
 
-    
-    combo = pygame.Surface((max(glow.get_width(), text_core.get_width()),
-                            max(glow.get_height(), text_core.get_height())), pygame.SRCALPHA)
+    combo = pygame.Surface((max(glow.get_width(), core.get_width()),
+                            max(glow.get_height(), core.get_height())), pygame.SRCALPHA)
     combo.blit(glow, ((combo.get_width()-glow.get_width())//2, (combo.get_height()-glow.get_height())//2))
-    combo.blit(text_core, ((combo.get_width()-text_core.get_width())//2, (combo.get_height()-text_core.get_height())//2))
+    combo.blit(core, ((combo.get_width()-core.get_width())//2, (combo.get_height()-core.get_height())//2))
+    combo = pygame.transform.rotozoom(combo, -90, 1.0)  # vertical
 
-    
-    combo = pygame.transform.rotozoom(combo, -90, 1.0)
-
- 
     px = (w - combo.get_width()) // 2
     py = (h - combo.get_height()) // 2
     panel.blit(combo, (px, py), special_flags=pygame.BLEND_PREMULTIPLIED)
 
 def draw_panel(surf: pygame.Surface, rect: pygame.Rect, t: float, radius: int = 16):
-    """Панель полностью: свечение, наполнение, вертикальная надпись, окантовка, скан-лента."""
     if rect.width <= 0 or rect.height <= 0: return
 
-  
+    # outer glow
     pad = 14
     glow = pygame.Surface((rect.width + pad*2, rect.height + pad*2), pygame.SRCALPHA)
     pygame.draw.rect(glow, (*COL_GLOW, GLOW_ALPHA),
@@ -188,32 +164,27 @@ def draw_panel(surf: pygame.Surface, rect: pygame.Rect, t: float, radius: int = 
                      border_radius=radius + pad//2)
     surf.blit(glow, (rect.x - pad, rect.y - pad), special_flags=pygame.BLEND_PREMULTIPLIED)
 
-   
+    # inner panel
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
 
-   
     pulse = 1.0 + PULSE_AMT * (1 - math.cos(t * PULSE_SPEED * 2.0 * math.pi)) * 0.5
     draw_soft_fill(panel, radius)
     if pulse != 1.0:
         tint = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        mul = clamp8(255 * (pulse - 1.0))
+        mul = max(0, min(70, int(255 * (pulse - 1.0))))
         if mul > 0:
-            tint.fill((COL_GLOW[0], COL_GLOW[1], COL_GLOW[2], min(60, mul)))
+            tint.fill((COL_GLOW[0], COL_GLOW[1], COL_GLOW[2], mul))
             panel.blit(tint, (0, 0), special_flags=pygame.BLEND_ADD)
 
-   
     draw_label_vertical(panel, t, LABEL_TEXT)
-
-   
     draw_scan_band(panel, t)
 
-    
     pygame.draw.rect(panel, (*COL_EDGE, EDGE_ALPHA),
                      (0, 0, rect.width, rect.height), width=3, border_radius=radius)
 
     surf.blit(panel, rect.topleft)
 
-# ---------------- Entities ----------------
+# -------------------- ENTITIES --------------------
 class Ship:
     def __init__(self, img):
         self.x = W * 0.25
@@ -224,17 +195,18 @@ class Ship:
 
         base_mask = pygame.mask.from_surface(self.base_img, 10)
         rects = base_mask.get_bounding_rects()
-        if rects: bbox = rects[0]
-        else:     bbox = pygame.Rect(0, 0, self.base_img.get_width(), self.base_img.get_height())
+        if rects:
+            bbox = rects[0]
+        else:
+            bbox = pygame.Rect(0, 0, self.base_img.get_width(), self.base_img.get_height())
 
         self.anchor_base = (bbox.left + NOZZLE_INSET, bbox.top + bbox.height // 2)
-        self.base_center = (self.base_img.get_width() / 2.0, self.base_img.get_height() / 2.0)
+        self.base_center = (self.base_img.get_width()/2.0, self.base_img.get_height()/2.0)
 
         self.current_img = self.base_img
         self.current_rect = self.current_img.get_rect(center=(int(self.x), int(self.y)))
         self.current_mask = pygame.mask.from_surface(self.current_img, 10)
         self.angle_deg = 0.0
-
         self.thrust_timer = 0.0
 
     @property
@@ -285,7 +257,9 @@ class Ship:
 
 class Gate:
     def __init__(self, x, gap_y):
-        self.x = float(x); self.gap_y = gap_y; self.passed = False
+        self.x = float(x)
+        self.gap_y = gap_y
+        self.passed = False
 
     @property
     def top_rect(self): return pygame.Rect(int(self.x), 0, GATE_W, self.gap_y - GATE_GAP // 2)
@@ -301,14 +275,15 @@ class Gate:
         if self.top_rect.height > 0: draw_panel(surf, self.top_rect, t, radius=16)
         if self.bot_rect.height > 0: draw_panel(surf, self.bot_rect, t, radius=16)
 
-# ---------------- Game ----------------
+# -------------------- GAME --------------------
 def add_gate(gates, x):
     gap_y = random.randint(GATE_MIN + GATE_GAP // 2, GATE_MAX - GATE_GAP // 2)
     gates.append(Gate(x, gap_y))
 
 def reset_game(ship_img):
     ship = Ship(ship_img)
-    gates = []; spawn = W + 120
+    gates = []
+    spawn = W + 120
     for i in range(4): add_gate(gates, spawn + i * GATE_SPACING)
     return ship, gates, 0, False, True
 
@@ -334,14 +309,16 @@ def draw_hud(screen, score, best, started, running, fonts):
 async def main():
     pygame.init()
     screen = pygame.display.set_mode((W, H))
-    pygame.display.set_caption("Space Edition — columns with vertical RIALO")
+    pygame.display.set_caption("RIALO Space")
     clock = pygame.time.Clock()
     font_big = pygame.font.SysFont(None, 36, bold=True)
     font_small = pygame.font.SysFont(None, 24)
 
+    # assets
     bg_img = load_image(BG_NAME)
     ship_img = load_image(SHIP_NAME)
-    if not ship_img: sys.exit("ship.png not found!")
+    if not ship_img:
+        raise SystemExit("assets/ship.png not found")
     ship_img = pygame.transform.smoothscale(ship_img, SHIP_SIZE)
 
     ship, gates, score, started, running = reset_game(ship_img)
@@ -354,16 +331,23 @@ async def main():
         flap = False
 
         for e in pygame.event.get():
-            if e.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if e.type == pygame.QUIT:
+                pygame.quit(); return
             if e.type == pygame.KEYDOWN:
-                if e.key == pygame.K_ESCAPE: pygame.quit(); sys.exit()
-                if e.key == pygame.K_r: ship, gates, score, started, running = reset_game(ship_img)
+                if e.key == pygame.K_ESCAPE:
+                    pygame.quit(); return
+                if e.key == pygame.K_r:
+                    ship, gates, score, started, running = reset_game(ship_img)
                 if e.key in (pygame.K_SPACE, pygame.K_UP): flap = True
-            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1: flap = True
+            if e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
+                flap = True
 
         if flap:
-            if running: started = True; ship.flap()
-            else: ship, gates, score, started, running = reset_game(ship_img)
+            if running:
+                started = True
+                ship.flap()
+            else:
+                ship, gates, score, started, running = reset_game(ship_img)
 
         if started and running:
             ship.update(dt)
@@ -385,17 +369,15 @@ async def main():
                     if mask_rect_overlap(ship.current_mask, g.bot_rect, (dx, dy)):
                         running = False; break
 
+        # draw
         draw_background(screen, bg_img)
         for g in gates: g.draw(screen, time_acc)
         ship.draw(screen)
         draw_hud(screen, score, best, started, running, (font_big, font_small))
+
         pygame.display.flip()
-        await asyncio.sleep(0)   
+        # critical for pygbag: yield control each frame
+        await asyncio.sleep(0)
 
 if __name__ == "__main__":
-
-    if sys.platform in ("emscripten", "wasi"):
-        asyncio.run(main())
-    else:
-
-        asyncio.run(main())
+    asyncio.run(main())
