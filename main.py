@@ -1,20 +1,18 @@
-# RIALO Space — Flappy-like game (PC + Web/pygbag)
-# Controls: SPACE / Mouse = flap, R = restart, ESC = quit
+# RIALO Space (diagnostic build for web): shows errors on screen if assets fail.
+# SPACE / Click = flap, R = restart, ESC = quit.
 
 import math, random, asyncio, sys
 from pathlib import Path
 import pygame
 
-# -------------------- CONFIG --------------------
+# ---------------- CONFIG ----------------
 W, H = 480, 720
 FPS = 60
 
-# physics
 GRAVITY = 1400.0
 FLAP_VY  = -460.0
 MAX_VY   = 900.0
 
-# gates
 GATE_W = 92
 GATE_GAP = 200
 GATE_MIN = 70
@@ -24,7 +22,7 @@ SCROLL_SPEED = 260.0
 
 HUD = (230, 250, 255)
 
-# column style (spacey soft blue)
+# columns
 COL_CORE    = (120, 205, 255)
 COL_EDGE    = ( 80, 170, 255)
 COL_GLOW    = (160, 220, 255)
@@ -39,14 +37,14 @@ EDGE_ALPHA   = 140
 SCAN_ALPHA   = 42
 SCAN_WIDTH_F = 0.16
 
-# vertical RIALO label inside columns
+# label
 LABEL_TEXT           = "RIALO"
 LABEL_CORE_COLOR     = (240, 250, 255)
 LABEL_GLOW_COLOR     = (170, 230, 255)
 LABEL_GLOW_ALPHA     = 1800
 LABEL_BREATH_AMT     = 0.4
 LABEL_MARGIN_PX      = 6
-LABEL_EXTRA_W_STRETCH= 1.6
+LABEL_EXTRA_W_STRETCH= 1.66
 
 # ship + flame
 SHIP_SIZE    = (72, 72)
@@ -59,16 +57,22 @@ FLAME_Y_OFFSET = 5
 NOZZLE_INSET   = 2
 
 # assets
-ASSET_DIRS = [Path("."), Path("./assets")]
-BG_NAME    = "space_bg.png"
-SHIP_NAME  = "ship.png"
+ASSETS = [Path("."), Path("./assets")]
+BG_NAME   = "space_bg.png"
+SHIP_NAME = "ship.png"
 
-# -------------------- UTILS --------------------
+# ---------------- UTILS ----------------
 def load_image(name: str):
-    for d in ASSET_DIRS:
+    for d in ASSETS:
         p = d / name
         if p.exists():
-            return pygame.image.load(str(p)).convert_alpha()
+            try:
+                img = pygame.image.load(str(p)).convert_alpha()
+                print(f"[load_image] OK: {p}")
+                return img
+            except Exception as e:
+                print(f"[load_image] Failed to load {p}: {e}")
+    print(f"[load_image] NOT FOUND: {name} (checked {ASSETS})")
     return None
 
 def mask_rect_overlap(mask: pygame.mask.Mask, rect: pygame.Rect, offset):
@@ -82,11 +86,9 @@ def mask_rect_overlap(mask: pygame.mask.Mask, rect: pygame.Rect, offset):
 def lerp(a, b, t): return a + (b - a) * t
 def clamp8(x): return max(0, min(255, int(x)))
 
-# -------------------- COLUMNS DRAW --------------------
+# ---------------- COLUMNS ----------------
 def draw_soft_fill(panel: pygame.Surface, radius: int):
     w, h = panel.get_width(), panel.get_height()
-
-    # vertical gradient
     for y in range(h):
         ky = y / max(1, h - 1)
         mul = (0.86 + 0.14 * (1 - ky))
@@ -94,15 +96,11 @@ def draw_soft_fill(panel: pygame.Surface, radius: int):
         g = clamp8(COL_CORE[1] * mul)
         b = clamp8(COL_CORE[2] * mul)
         pygame.draw.line(panel, (r, g, b), (0, y), (w - 1, y))
-
-    # soft diagonal circuits
     stripes = pygame.Surface((w, h), pygame.SRCALPHA)
     step = 14
     for x in range(-h, w, step):
         pygame.draw.line(stripes, (*COL_STRIPE, 24), (x, 0), (x + h, h), width=2)
     panel.blit(stripes, (0, 0), special_flags=pygame.BLEND_ADD)
-
-    # rounded mask
     mask = pygame.Surface((w, h), pygame.SRCALPHA)
     pygame.draw.rect(mask, (255, 255, 255, 255), (0, 0, w, h), border_radius=radius)
     panel.blit(mask, (0, 0), special_flags=pygame.BLEND_MULT)
@@ -120,53 +118,41 @@ def draw_scan_band(panel: pygame.Surface, t: float):
     panel.blit(band, (0, band_y - band_h // 2), special_flags=pygame.BLEND_ADD)
 
 def draw_label_vertical(panel: pygame.Surface, t: float, text: str = LABEL_TEXT):
-    # wide vertical glowing label "RIALO"
     w, h = panel.get_width(), panel.get_height()
     if w <= 6 or h <= 6: return
-
     breath = 1.0 + LABEL_BREATH_AMT * math.sin(t * 2.0 * math.pi * 0.25)
     target_w = max(4, int((w - LABEL_MARGIN_PX * 2) * LABEL_EXTRA_W_STRETCH * breath))
-
     base_size = max(14, int(h * 0.24))
     font = pygame.font.SysFont(None, base_size, bold=True)
-
     core = font.render(text, True, LABEL_CORE_COLOR)
     ratio = target_w / max(1, core.get_width())
     new_w = max(1, int(core.get_width() * ratio))
     new_h = max(1, int(core.get_height() * ratio * 0.95))
     core = pygame.transform.smoothscale(core, (new_w, new_h))
-
     glow = pygame.Surface((core.get_width()+12, core.get_height()+12), pygame.SRCALPHA)
     for dx, dy in [(-2,0),(2,0),(0,-2),(0,2),(-1,-1),(1,1),(-1,1),(1,-1)]:
         tmp = font.render(text, True, LABEL_GLOW_COLOR)
         tmp = pygame.transform.smoothscale(tmp, (new_w, new_h))
         glow.blit(tmp, (dx+6, dy+6))
     glow.set_alpha(LABEL_GLOW_ALPHA)
-
     combo = pygame.Surface((max(glow.get_width(), core.get_width()),
                             max(glow.get_height(), core.get_height())), pygame.SRCALPHA)
     combo.blit(glow, ((combo.get_width()-glow.get_width())//2, (combo.get_height()-glow.get_height())//2))
     combo.blit(core, ((combo.get_width()-core.get_width())//2, (combo.get_height()-core.get_height())//2))
-    combo = pygame.transform.rotozoom(combo, -90, 1.0)  # vertical
-
+    combo = pygame.transform.rotozoom(combo, -90, 1.0)
     px = (w - combo.get_width()) // 2
     py = (h - combo.get_height()) // 2
     panel.blit(combo, (px, py), special_flags=pygame.BLEND_PREMULTIPLIED)
 
 def draw_panel(surf: pygame.Surface, rect: pygame.Rect, t: float, radius: int = 16):
     if rect.width <= 0 or rect.height <= 0: return
-
-    # outer glow
     pad = 14
     glow = pygame.Surface((rect.width + pad*2, rect.height + pad*2), pygame.SRCALPHA)
     pygame.draw.rect(glow, (*COL_GLOW, GLOW_ALPHA),
                      (0, 0, glow.get_width(), glow.get_height()),
                      border_radius=radius + pad//2)
     surf.blit(glow, (rect.x - pad, rect.y - pad), special_flags=pygame.BLEND_PREMULTIPLIED)
-
-    # inner panel
     panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-
     pulse = 1.0 + PULSE_AMT * (1 - math.cos(t * PULSE_SPEED * 2.0 * math.pi)) * 0.5
     draw_soft_fill(panel, radius)
     if pulse != 1.0:
@@ -175,34 +161,25 @@ def draw_panel(surf: pygame.Surface, rect: pygame.Rect, t: float, radius: int = 
         if mul > 0:
             tint.fill((COL_GLOW[0], COL_GLOW[1], COL_GLOW[2], mul))
             panel.blit(tint, (0, 0), special_flags=pygame.BLEND_ADD)
-
     draw_label_vertical(panel, t, LABEL_TEXT)
     draw_scan_band(panel, t)
-
     pygame.draw.rect(panel, (*COL_EDGE, EDGE_ALPHA),
                      (0, 0, rect.width, rect.height), width=3, border_radius=radius)
-
     surf.blit(panel, rect.topleft)
 
-# -------------------- ENTITIES --------------------
+# ---------------- ENTITIES ----------------
 class Ship:
     def __init__(self, img):
         self.x = W * 0.25
         self.y = H * 0.5
         self.vy = 0.0
-
         self.base_img = pygame.transform.smoothscale(img, SHIP_SIZE)
-
         base_mask = pygame.mask.from_surface(self.base_img, 10)
         rects = base_mask.get_bounding_rects()
-        if rects:
-            bbox = rects[0]
-        else:
-            bbox = pygame.Rect(0, 0, self.base_img.get_width(), self.base_img.get_height())
-
+        if rects: bbox = rects[0]
+        else:     bbox = pygame.Rect(0, 0, self.base_img.get_width(), self.base_img.get_height())
         self.anchor_base = (bbox.left + NOZZLE_INSET, bbox.top + bbox.height // 2)
         self.base_center = (self.base_img.get_width()/2.0, self.base_img.get_height()/2.0)
-
         self.current_img = self.base_img
         self.current_rect = self.current_img.get_rect(center=(int(self.x), int(self.y)))
         self.current_mask = pygame.mask.from_surface(self.current_img, 10)
@@ -229,10 +206,8 @@ class Ship:
         self.vy = min(self.vy + GRAVITY * dt, MAX_VY)
         self.y += self.vy * dt
         if self.thrust_timer > 0: self.thrust_timer -= dt
-
         vy_clamp = max(-420, min(420, self.vy))
         self.angle_deg = -vy_clamp / 420 * 12
-
         self.current_img = pygame.transform.rotozoom(self.base_img, self.angle_deg, 1.0)
         self.current_rect = self.current_img.get_rect(center=(int(self.x), int(self.y)))
         self.current_mask = pygame.mask.from_surface(self.current_img, 10)
@@ -260,30 +235,25 @@ class Gate:
         self.x = float(x)
         self.gap_y = gap_y
         self.passed = False
-
     @property
     def top_rect(self): return pygame.Rect(int(self.x), 0, GATE_W, self.gap_y - GATE_GAP // 2)
     @property
     def bot_rect(self):
         by = self.gap_y + GATE_GAP // 2
         return pygame.Rect(int(self.x), by, GATE_W, H - by)
-
-    def update(self, dt):
-        self.x -= SCROLL_SPEED * dt
-
+    def update(self, dt): self.x -= SCROLL_SPEED * dt
     def draw(self, surf, t):
         if self.top_rect.height > 0: draw_panel(surf, self.top_rect, t, radius=16)
         if self.bot_rect.height > 0: draw_panel(surf, self.bot_rect, t, radius=16)
 
-# -------------------- GAME --------------------
+# ------------- GAME -------------
 def add_gate(gates, x):
     gap_y = random.randint(GATE_MIN + GATE_GAP // 2, GATE_MAX - GATE_GAP // 2)
     gates.append(Gate(x, gap_y))
 
 def reset_game(ship_img):
     ship = Ship(ship_img)
-    gates = []
-    spawn = W + 120
+    gates = []; spawn = W + 120
     for i in range(4): add_gate(gates, spawn + i * GATE_SPACING)
     return ship, gates, 0, False, True
 
@@ -294,12 +264,17 @@ def draw_background(screen, bg_img):
         bg = pygame.transform.smoothscale(bg_img, (int(iw * scale), int(ih * scale)))
         screen.blit(bg, ((W - bg.get_width()) // 2, (H - bg.get_height()) // 2))
     else:
-        screen.fill((0, 0, 0))
+        # Фолбэк-градиент, если фон не загрузился
+        for y in range(H):
+            k = y / (H-1)
+            c = (int(5 + 25*k), int(10 + 25*k), int(20 + 70*k))
+            pygame.draw.line(screen, c, (0, y), (W-1, y))
 
-def draw_hud(screen, score, best, started, running, fonts):
+def draw_hud(screen, score, best, started, running, fonts, frame):
     big, small = fonts
     txt = big.render(f"Score: {score}", True, HUD); screen.blit(txt, (W//2 - txt.get_width()//2, 16))
     best_txt = small.render(f"Best: {best}", True, HUD); screen.blit(best_txt, (16, 14))
+    frame_txt = small.render(f"frame: {frame}", True, HUD); screen.blit(frame_txt, (W-16-frame_txt.get_width(), 14))
     if not started:
         tip = small.render("Click or SPACE to start", True, HUD); screen.blit(tip, (W//2 - tip.get_width()//2, H//2))
     if not running:
@@ -307,27 +282,35 @@ def draw_hud(screen, score, best, started, running, fonts):
         tip2 = small.render("Press R to restart", True, HUD); screen.blit(tip2, (W//2 - tip2.get_width()//2, int(H*0.5)))
 
 async def main():
+    print("[main] start")
     pygame.init()
     screen = pygame.display.set_mode((W, H))
-    pygame.display.set_caption("RIALO Space")
+    pygame.display.set_caption("RIALO Space (diagnostic)")
     clock = pygame.time.Clock()
     font_big = pygame.font.SysFont(None, 36, bold=True)
     font_small = pygame.font.SysFont(None, 24)
 
-    # assets
+    # assets (с защитой от ошибок)
     bg_img = load_image(BG_NAME)
-    ship_img = load_image(SHIP_NAME)
-    if not ship_img:
-        raise SystemExit("assets/ship.png not found")
-    ship_img = pygame.transform.smoothscale(ship_img, SHIP_SIZE)
+    ship_raw = load_image(SHIP_NAME)
+    asset_error = None
+    if not ship_raw:
+        asset_error = "assets/ship.png NOT FOUND"
+        # рисуем заглушку вместо корабля
+        ship_raw = pygame.Surface((64, 64), pygame.SRCALPHA)
+        pygame.draw.circle(ship_raw, (180, 220, 255), (32, 32), 28)
+    ship_img = pygame.transform.smoothscale(ship_raw, SHIP_SIZE)
 
     ship, gates, score, started, running = reset_game(ship_img)
     best = 0
     time_acc = 0.0
+    frame = 0
 
+    print("[main] loop running...")
     while True:
         dt = clock.tick(FPS) / 1000.0
         time_acc += dt
+        frame += 1
         flap = False
 
         for e in pygame.event.get():
@@ -373,10 +356,14 @@ async def main():
         draw_background(screen, bg_img)
         for g in gates: g.draw(screen, time_acc)
         ship.draw(screen)
-        draw_hud(screen, score, best, started, running, (font_big, font_small))
+        draw_hud(screen, score, best, started, running, (font_big, font_small), frame)
+
+        # если ассет не загрузился — покажем это прямо на экране
+        if asset_error:
+            warn = font_small.render(asset_error, True, (255, 120, 120))
+            screen.blit(warn, (W//2 - warn.get_width()//2, H - 40))
 
         pygame.display.flip()
-        # critical for pygbag: yield control each frame
         await asyncio.sleep(0)
 
 if __name__ == "__main__":
