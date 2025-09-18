@@ -1,5 +1,5 @@
 
-
+import asyncio, sys
 import sys, random, math
 from pathlib import Path
 import pygame
@@ -331,7 +331,7 @@ def draw_hud(screen, score, best, started, running, fonts):
         over = big.render("GAME OVER", True, HUD); screen.blit(over, (W//2 - over.get_width()//2, int(H*0.45)))
         tip2 = small.render("Press R to restart", True, HUD); screen.blit(tip2, (W//2 - tip2.get_width()//2, int(H*0.5)))
 
-def main():
+async def main():
     pygame.init()
     screen = pygame.display.set_mode((W, H))
     pygame.display.set_caption("Space Edition — columns with vertical RIALO")
@@ -390,6 +390,12 @@ def main():
         ship.draw(screen)
         draw_hud(screen, score, best, started, running, (font_big, font_small))
         pygame.display.flip()
+        await asyncio.sleep(0)   
 
 if __name__ == "__main__":
-    main()
+
+    if sys.platform in ("emscripten", "wasi"):
+        asyncio.run(main())
+    else:
+
+        asyncio.run(main())
